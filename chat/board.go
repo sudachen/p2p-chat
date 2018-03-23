@@ -2,47 +2,58 @@ package chat
 
 import (
 	"sync"
-
-	"github.com/ethereum/go-ethereum/log"
+	"sync/atomic"
 	"time"
+	"unsafe"
 )
 
 const expireTimeout = 10 * time.Second
 
 type board struct {
-	mu         sync.Mutex
-	ring       []*message
-	head, tail uint64
-	mu2        sync.Mutex
-	known      map[Hash]int64
+	ring  []unsafe.Pointer
+	index int64
+	mu    sync.RWMutex
+	known map[Hash]int64
 }
 
 func newBoard(ringSize int) *board {
 	return &board{
 		known: make(map[Hash]int64),
-		ring:  make([]*message, ringSize),
+		ring:  make([]unsafe.Pointer, ringSize),
 	}
 }
 
-func (brd *board) get(index uint64) (m *message, newIndex uint64) {
-	brd.mu.Lock()
-	defer brd.mu.Unlock()
-	newIndex = index
-	if brd.head > newIndex {
-		newIndex = brd.head
+func (brd *board) get(index int64) (*message, int64) {
+	L := int64(len(brd.ring))
+
+	for { // trying to fetch message by index
+		head := int64(0)
+		tail := atomic.LoadInt64(&brd.index)
+		if tail > L {
+			head = tail - L
+		}
+		if index < head {
+			index = head
+		}
+		if index >= tail {
+			return nil, index
+		}
+		p := &brd.ring[index%L]
+		m := (*message)(atomic.LoadPointer(p))
+		if m == nil || m.index < index {
+			return nil, index
+		}
+		if m.index == index {
+			return m, index + 1
+		}
 	}
-	if newIndex < brd.tail {
-		m = brd.ring[newIndex%uint64(len(brd.ring))]
-		newIndex += 1
-	}
-	return
 }
 
 func (brd *board) know(m *message) bool {
 	h := m.hash() // can take a time
-	brd.mu2.Lock()
+	brd.mu.RLock()
 	_, exists := brd.known[h]
-	brd.mu2.Unlock()
+	brd.mu.RUnlock()
 	return exists
 }
 
@@ -50,27 +61,23 @@ func (brd *board) put(m *message) {
 	hash := m.hash()    // can take a time
 	dt := m.deathTime() // can take a time
 
-	brd.mu2.Lock()
+	brd.mu.RLock()
 	_, exists := brd.known[hash]
-	if !exists {
-		brd.known[hash] = dt
-	}
-	brd.mu2.Unlock()
+	brd.mu.RUnlock()
+
 	if exists {
 		return
 	}
 
 	brd.mu.Lock()
-	L := uint64(len(brd.ring))
-	index := brd.tail%L
-	if brd.tail == brd.head+L {
-		brd.head += 1
-	}
-
-	log.Trace("put to ring", "hash", m.hash(), "index", brd.tail, "hash")
-	brd.ring[index] = m
-	brd.tail += 1
+	brd.known[hash] = dt
 	brd.mu.Unlock()
+
+	L := int64(len(brd.ring))
+	tail := atomic.AddInt64(&brd.index, 1)
+	m.index = tail - 1
+	p := &brd.ring[m.index%L]
+	atomic.StorePointer(p, unsafe.Pointer(m))
 }
 
 func (brd *board) expire(quit chan struct{}) {
@@ -79,12 +86,12 @@ func (brd *board) expire(quit chan struct{}) {
 		if done2(quit, clock.C) {
 			return
 		}
-		brd.mu2.Lock()
+		brd.mu.Lock()
 		for k, d := range brd.known {
 			if d > time.Now().Unix() {
 				delete(brd.known, k)
 			}
 		}
-		brd.mu2.Unlock()
+		brd.mu.Unlock()
 	}
 }

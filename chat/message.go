@@ -1,18 +1,17 @@
 package chat
 
 import (
-	"crypto/sha1"
 	"bytes"
-	"time"
+	"crypto/sha1"
+	"encoding/hex"
 	"errors"
-
-	"github.com/ethereum/go-ethereum/common"
+	"time"
 )
 
 type Hash [20]byte
 
 func (h Hash) String() string {
-	return common.Bytes2Hex(h[:])
+	return hex.EncodeToString(h[:])
 }
 
 type Message struct {
@@ -39,10 +38,12 @@ func (mesg *Message) Hash() Hash {
 }
 
 type message struct {
+	body []byte // the message bytes
+
 	cDeathtime int64  // cached death time
 	cHash      *Hash  // cached message hash
-	body       []byte
-	peer       *peer  // originating peer
+	peerID     []byte // originating peer
+	index      int64  // message index in ring
 }
 
 func (m *message) validate() error {

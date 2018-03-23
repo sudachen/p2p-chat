@@ -1,36 +1,40 @@
 package chat
 
 import (
-	"testing"
-	"crypto/ecdsa"
-	"net"
-	"fmt"
-	"time"
-	"sync"
 	"bytes"
+	"crypto/ecdsa"
+	"encoding/hex"
+	"fmt"
+	"net"
+	"sync"
+	"testing"
+	"time"
 
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/sudachen/misc/out"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/p2p"
 )
 
 const nodesCount = 7
 const mesgsCount = 30
-const maxPeersPerNode = nodesCount/2+1
+const maxPeersPerNode = nodesCount/2 + 1
 const ringSize = 1000
 
 func TestPropagation(t *testing.T) {
 	ns := setup(nodesCount, ringSize, maxPeersPerNode, t)
 	out.Info.Printf("%d nodes started", len(ns))
 
-	type S struct{Hash;string}
-	hs := make([]S,mesgsCount*nodesCount)
+	type S struct {
+		Hash
+		string
+	}
+	hs := make([]S, mesgsCount*nodesCount)
 
-	ns.checkpoint(0,t)
+	ns.checkpoint(0, t)
 
 	out.Info.Print("SENDING MESSAGES")
 
@@ -45,7 +49,7 @@ func TestPropagation(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				hs[n.no*mesgsCount+i] = S{h,s}
+				hs[n.no*mesgsCount+i] = S{h, s}
 			}
 			wg.Done()
 		}(n)
@@ -71,7 +75,7 @@ CheckPropagation:
 				break WaitingFor10secMax
 			}
 			out.Info.Printf("Waiting for node %d, it missed %d messages", n.no, count)
-			<- time.After(time.Second)
+			<-time.After(time.Second)
 		}
 		if count != 0 {
 			break CheckPropagation
@@ -97,13 +101,13 @@ CheckPropagation:
 				}
 			}
 			iid := discover.PubkeyID(&n.id.PublicKey)
-			bf.WriteString(fmt.Sprintf("ring (%v):\n",common.Bytes2Hex(iid[:8])))
+			bf.WriteString(fmt.Sprintf("ring (%v):\n", hex.EncodeToString(iid[:8])))
 			m, i := n.board.get(0)
 			for m != nil {
 				mesg, _ := m.open()
 				peer := "self"
-				if m.peer != nil {
-					peer = common.Bytes2Hex(m.peer.ID()[:8])
+				if m.peerID != nil {
+					peer = hex.EncodeToString(m.peerID[:8])
 				}
 				bf.WriteString(fmt.Sprintf(" %3d, %v: %v, %v\n", i-1, m.hash(), mesg.Text, peer))
 				m, i = n.board.get(i)
@@ -114,13 +118,13 @@ CheckPropagation:
 }
 
 type testNode struct {
-	no 		int
-	id      *ecdsa.PrivateKey
-	server  *p2p.Server
-	board   *board
-	quit    chan struct{}
-	hashes  map[Hash]struct{}
-	mu		sync.Mutex
+	no     int
+	id     *ecdsa.PrivateKey
+	server *p2p.Server
+	board  *board
+	quit   chan struct{}
+	hashes map[Hash]struct{}
+	mu     sync.Mutex
 }
 
 type nodes []*testNode
@@ -164,7 +168,7 @@ func setup(nodesCount int, boardRingSize int, maxPeersPerNode int, t *testing.T)
 				PrivateKey:     node.id,
 				MaxPeers:       maxPeersPerNode,
 				Name:           name,
-				Protocols:      protocols(node.board,100000),
+				Protocols:      protocols(node.board, 100000),
 				ListenAddr:     addr,
 				NAT:            nat.Any(),
 				BootstrapNodes: peers,
@@ -176,14 +180,14 @@ func setup(nodesCount int, boardRingSize int, maxPeersPerNode int, t *testing.T)
 		ns = append(ns, &node)
 	}
 
-	ec := make(chan error,nodesCount)
+	ec := make(chan error, nodesCount)
 	ns[0].start(ec)
 	for i := 1; i < nodesCount; i++ {
 		go ns[i].start(ec)
 	}
 
 	for i := 0; i < nodesCount; i++ {
-		err := <- ec
+		err := <-ec
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,8 +204,8 @@ func (n *testNode) has(h Hash) bool {
 }
 
 func (n *testNode) watch() {
-	delay := time.NewTicker(100*time.Millisecond)
-	var index uint64
+	delay := time.NewTicker(100 * time.Millisecond)
+	var index int64
 	var m *message
 	for {
 		if done2(n.quit, delay.C) {
@@ -230,7 +234,7 @@ func (n *testNode) watch() {
 func (ns nodes) checkpoint(no int, t *testing.T) {
 	out.Info.Printf("CHECKPOINT %d", no)
 
-	h, err := ns[0].send("", fmt.Sprintf("CHECKPOINT %d",no))
+	h, err := ns[0].send("", fmt.Sprintf("CHECKPOINT %d", no))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +268,6 @@ func (n *testNode) start(ec chan error) {
 	go n.board.expire(n.quit)
 	ec <- nil
 }
-
 
 func (n *testNode) stop() {
 	n.server.Stop()

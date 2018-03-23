@@ -1,18 +1,18 @@
 package chat
 
 import (
-	"time"
 	"errors"
 	"fmt"
+	"time"
 
-	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
 const (
-	statusCode = 0
-	messagesCode = 1
+	statusCode           = 0
+	messagesCode         = 1
 	NumberOfMessageCodes = 255
 )
 
@@ -24,9 +24,9 @@ const batchLength = 10
 const broadcastTimeout = 100 * time.Millisecond
 
 type peer struct {
-	board  	*board
-	p2   	*p2p.Peer
-	rw   	p2p.MsgReadWriter
+	board *board
+	p2    *p2p.Peer
+	rw    p2p.MsgReadWriter
 }
 
 func protocols(brd *board, p2pMaxPkgSize uint32) []p2p.Protocol {
@@ -37,7 +37,7 @@ func protocols(brd *board, p2pMaxPkgSize uint32) []p2p.Protocol {
 			Length:  NumberOfMessageCodes,
 			NodeInfo: func() interface{} {
 				return map[string]interface{}{
-					"version": ProtocolVersionStr,
+					"version":        ProtocolVersionStr,
 					"maxMessageSize": p2pMaxPkgSize,
 				}
 			},
@@ -55,7 +55,7 @@ func (p *peer) ID() []byte {
 
 func (p *peer) broadcast(quit chan struct{}) {
 	t := time.NewTicker(broadcastTimeout)
-	var index uint64
+	var index int64
 	batch := make([][]byte, batchLength)
 	for {
 		if done2(quit, t.C) {
@@ -159,7 +159,7 @@ func (p *peer) loop(p2pMaxPkgSize uint32) error {
 			}
 
 			for _, b := range bs {
-				m := &message{body: b, peer: p}
+				m := &message{body: b, peerID: p.p2.ID().Bytes()}
 				if err := m.validate(); err != nil {
 					log.Error("bad message received, peer will be disconnected", "peer", p.ID(), "err", err)
 					return errors.New("invalid message")
@@ -169,4 +169,3 @@ func (p *peer) loop(p2pMaxPkgSize uint32) error {
 		}
 	}
 }
-
