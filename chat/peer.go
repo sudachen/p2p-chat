@@ -27,6 +27,7 @@ type peer struct {
 	board *board
 	p2    *p2p.Peer
 	rw    p2p.MsgReadWriter
+	tsf   *TSF
 }
 
 func protocols(brd *board, p2pMaxPkgSize uint32) []p2p.Protocol {
@@ -42,7 +43,7 @@ func protocols(brd *board, p2pMaxPkgSize uint32) []p2p.Protocol {
 				}
 			},
 			Run: func(p2 *p2p.Peer, mrw p2p.MsgReadWriter) error {
-				return (&peer{brd, p2, mrw}).loop(p2pMaxPkgSize)
+				return (&peer{brd, p2, mrw, newTSF()}).loop(p2pMaxPkgSize)
 			},
 		},
 	}
@@ -70,7 +71,7 @@ func (p *peer) broadcast(quit chan struct{}) {
 			if done(quit) {
 				return
 			}
-			if m.deathTime() > now {
+			if p.tsf.passDT(m,now) {
 				batch[n] = m.body
 				n++
 			}
@@ -131,6 +132,7 @@ func (p *peer) loop(p2pMaxPkgSize uint32) error {
 
 	quit := make(chan struct{})
 	go p.broadcast(quit)
+	go p.tsf.expire(quit)
 	defer close(quit)
 
 	for {
@@ -164,7 +166,10 @@ func (p *peer) loop(p2pMaxPkgSize uint32) error {
 					log.Error("bad message received, peer will be disconnected", "peer", p.ID(), "err", err)
 					return errors.New("invalid message")
 				}
-				p.board.put(m)
+				now := time.Now().Unix()
+				if p.tsf.passDT(m,now) {
+					p.board.put(m)
+				}
 			}
 		}
 	}

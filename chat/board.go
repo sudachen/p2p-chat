@@ -1,25 +1,20 @@
 package chat
 
 import (
-	"sync"
 	"sync/atomic"
-	"time"
 	"unsafe"
 )
 
-const expireTimeout = 10 * time.Second
-
 type board struct {
-	ring  []unsafe.Pointer
 	index int64
-	mu    sync.RWMutex
-	known map[Hash]int64
+	ring  []unsafe.Pointer
+	tsf   *TSF
 }
 
 func newBoard(ringSize int) *board {
 	return &board{
-		known: make(map[Hash]int64),
 		ring:  make([]unsafe.Pointer, ringSize),
+		tsf:   newTSF(),
 	}
 }
 
@@ -49,29 +44,11 @@ func (brd *board) get(index int64) (*message, int64) {
 	}
 }
 
-func (brd *board) know(m *message) bool {
-	h := m.hash() // can take a time
-	brd.mu.RLock()
-	_, exists := brd.known[h]
-	brd.mu.RUnlock()
-	return exists
-}
-
 func (brd *board) put(m *message) {
-	hash := m.hash()    // can take a time
-	dt := m.deathTime() // can take a time
 
-	brd.mu.RLock()
-	_, exists := brd.known[hash]
-	brd.mu.RUnlock()
-
-	if exists {
+	if !brd.tsf.pass(m) {
 		return
 	}
-
-	brd.mu.Lock()
-	brd.known[hash] = dt
-	brd.mu.Unlock()
 
 	L := int64(len(brd.ring))
 	tail := atomic.AddInt64(&brd.index, 1)
@@ -81,17 +58,5 @@ func (brd *board) put(m *message) {
 }
 
 func (brd *board) expire(quit chan struct{}) {
-	clock := time.NewTicker(expireTimeout)
-	for {
-		if done2(quit, clock.C) {
-			return
-		}
-		brd.mu.Lock()
-		for k, d := range brd.known {
-			if d > time.Now().Unix() {
-				delete(brd.known, k)
-			}
-		}
-		brd.mu.Unlock()
-	}
+	brd.tsf.expire(quit)
 }

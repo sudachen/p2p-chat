@@ -285,7 +285,7 @@ func (ns nodes) stop() {
 
 func (n *testNode) send(room, text string) (Hash, error) {
 	m := &message{}
-	if err := m.seal(&Message{Room: room, Text: text, TTL: 10000}); err != nil {
+	if err := m.seal(&Message{Room: room, Text: text}); err != nil {
 		return Hash{}, err
 	}
 	n.board.put(m)

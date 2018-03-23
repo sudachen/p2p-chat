@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const TTL = 60 // seconds
+
 type Hash [20]byte
 
 func (h Hash) String() string {
@@ -18,7 +20,6 @@ type Message struct {
 	Room      string `json:"room"`
 	Nickname  string `json:"nickname"`
 	Text      string `json:"text"`
-	TTL       uint32 `json:"ttl,omitempty"`
 	Timestamp int64  `json:"timestamp,omitempty"` // ignored on seal
 	// currently message signing is not implemented
 	// Identity   string    `json:"identity,omitempty"`
@@ -27,8 +28,7 @@ type Message struct {
 func (mesg *Message) EqualNoStamp(a *Message) bool {
 	return mesg.Room == a.Room &&
 		mesg.Nickname == a.Nickname &&
-		mesg.Text == a.Text &&
-		mesg.TTL == a.TTL
+		mesg.Text == a.Text
 }
 
 func (mesg *Message) Hash() Hash {
@@ -46,6 +46,10 @@ type message struct {
 	index      int64  // message index in ring
 }
 
+func (m *message) expired() bool {
+	return m.deathTime() <= time.Now().Unix()
+}
+
 func (m *message) validate() error {
 	return nil
 }
@@ -53,8 +57,7 @@ func (m *message) validate() error {
 func (m *message) deathTime() int64 {
 	if m.cDeathtime == 0 {
 		ts, _ := m.fetchTimestamp()
-		ttl, _ := m.fetchTTL()
-		m.cDeathtime = ts + int64(ttl)
+		m.cDeathtime = ts + TTL
 	}
 	return m.cDeathtime
 }
@@ -75,11 +78,6 @@ func (m *message) encode(mesg *Message, timestamp int64) error {
 	// timestamp
 	for n := 0; n < 8; n++ {
 		b.WriteByte(byte(timestamp >> (uint(n) * 8)))
-	}
-
-	// ttl
-	for n := 0; n < 4; n++ {
-		b.WriteByte(byte(mesg.TTL >> (uint(n) * 8)))
 	}
 
 	// room
@@ -127,18 +125,6 @@ func (m *message) fetchTimestamp() (int64, error) {
 	return ts, nil
 }
 
-func (m *message) fetchTTL() (uint32, error) {
-	var ttl uint32
-	if len(m.body) < 8+4 {
-		return 0, badMessageError
-	}
-	b := m.body[8:]
-	for n := 0; n < 4; n++ {
-		ttl |= uint32(b[n]) << (uint(n) * 8)
-	}
-	return ttl, nil
-}
-
 func (m *message) open() (*Message, error) {
 	var l int
 	var b []byte
@@ -152,13 +138,7 @@ func (m *message) open() (*Message, error) {
 		return nil, err
 	}
 
-	// ttl
-	mesg.TTL, err = m.fetchTTL()
-	if err != nil {
-		return nil, err
-	}
-
-	b = m.body[12:]
+	b = m.body[8:]
 
 	// room
 	l = int(b[0])
